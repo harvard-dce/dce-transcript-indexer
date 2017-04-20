@@ -1,0 +1,20 @@
+{
+  "name": "DceTranscriptIndexer",
+  "description": "Elasticsearch indexer for IBM Watson transcript results",
+  "region": "us-east-1",
+  "handler": "function.lambda_handler",
+  "requirements": ["elasticsearch", "requests"],
+  "ignore": [
+    ".git",
+    "/*.pyc",
+    "/*.zip",
+    "README.md",
+    ".idea",
+    ".gitignore",
+    "fabfile.py",
+    "requirements.txt",
+    "/*.json"
+  ],
+  "timeout": 30,
+  "memory": 512
+}
