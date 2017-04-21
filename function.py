@@ -105,10 +105,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--results-file', type=str, required=True)
     parser.add_argument('--es-host', type=str)
+    parser.add_argument('--es-http-auth', type=str)
     parser.add_argument('--es-index-prefix', type=str)
     args = parser.parse_args()
 
-    for arg in ('es_host', 'es_index_prefix'):
+    for arg in ('es_host', 'es_index_prefix', 'es_http_auth'):
         if getattr(args, arg) is not None:
             os.environ[arg.upper()] = getattr(args, arg)
 

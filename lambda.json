@@ -3,6 +3,7 @@
   "description": "Elasticsearch indexer for IBM Watson transcript results",
   "region": "us-east-1",
   "handler": "function.lambda_handler",
+  "runtime": "python3.6",
   "requirements": ["elasticsearch", "requests"],
   "ignore": [
     ".git",
@@ -15,6 +16,6 @@
     "requirements.txt",
     "/*.json"
   ],
-  "timeout": 30,
-  "memory": 512
+  "timeout": 10,
+  "memory": 128
 }
