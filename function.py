@@ -79,16 +79,21 @@ def lambda_handler(event, context):
             raise
 
     es = es_connection()
-    mpid = data['user_token']
-    doc_timestamp = datetime.utcnow().isoformat()
-    index_date = datetime.utcnow().strftime('%Y-%m-%d')
-    index_name = es_index_prefix + '.' + index_date
 
     try:
+        mpid = data['user_token']
+        doc_timestamp = datetime.utcnow().isoformat()
+        index_date = datetime.utcnow().strftime('%Y-%m-%d')
+        index_name = es_index_prefix + '.' + index_date
+
         res = helpers.bulk(es, generate_docs(data, doc_timestamp, index_name))
         print("Indexed %d captions for mediapackage %s" % (res[0], mpid))
     except Exception as e:
-        print("Indexing failure: %s" % str(e))
+        if isinstance(e, KeyError) and 'user_token' in str(e):
+            print("Results object %s is missing the 'user_token'" % data['id'])
+        else:
+            print("Indexing of results object %s failed: %s" % (data['id'], str(e)))
+        raise
 
     # update the index alias for this mediapackage
     alias_index_pattern = es_index_prefix + '.*'
