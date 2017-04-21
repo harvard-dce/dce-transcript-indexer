@@ -7,11 +7,10 @@ import jmespath
 import argparse
 from datetime import datetime
 from elasticsearch import Elasticsearch, helpers, RequestsHttpConnection
-from botocore.vendored import requests
 
 s3 = boto3.resource('s3')
 
-def generate_docs(source_data, timestamp, es_index):
+def generate_docs(source_data, timestamp, index_name):
 
     query = 'results[*].results[*] | [].alternatives | []'
     for caption in jmespath.search(query, source_data):
@@ -22,7 +21,7 @@ def generate_docs(source_data, timestamp, es_index):
         outpoint = int(caption['timestamps'][-1][2])
 
         yield {
-            '_index': es_index,
+            '_index': index_name,
             '_type': 'caption',
             'transcript_id': source_data['id'],
             'generated': timestamp,
@@ -36,10 +35,8 @@ def generate_docs(source_data, timestamp, es_index):
 
 def lambda_handler(event, context):
 
-    index_date = datetime.utcnow().strftime('%Y-%d-%m')
     es_host = os.environ.get('ES_HOST', 'http://localhost:9200')
-    es_index = os.environ.get('ES_INDEX', 'transcripts.' + index_date)
-    es_index_pattern = os.environ.get('ES_INDEX_PATTERN', 'transcripts.*')
+    es_index_prefix = os.environ.get('ES_INDEX_PREFIX', 'transcripts')
     es_http_auth = os.environ.get('ES_HTTP_AUTH')
 
     if 'results_file' in event: # for local testing
@@ -60,9 +57,6 @@ def lambda_handler(event, context):
             print('Error getting object %s from bucket %s: %s' % (key, bucket_name, str(e)))
             raise
 
-    mpid = data['user_token']
-    timestamp = datetime.utcnow().isoformat()
-
     if es_http_auth is not None:
         es = Elasticsearch(
             [es_host],
@@ -74,19 +68,25 @@ def lambda_handler(event, context):
     else:
         es = Elasticsearch(es_host)
 
+    mpid = data['user_token']
+    doc_timestamp = datetime.utcnow().isoformat()
+    index_date = datetime.utcnow().strftime('%Y-%m-%d')
+    index_name = es_index_prefix + '.' + index_date
+
     try:
-        res = helpers.bulk(es, generate_docs(data, timestamp, es_index))
+        res = helpers.bulk(es, generate_docs(data, doc_timestamp, index_name))
         print("Indexed %d captions for mediapackage %s" % (res[0], mpid))
-    except Exception, e:
+    except Exception as e:
         print("Indexing failure: %s" % str(e))
 
     # update the index alias for this mediapackage
-    alias_filter = { "filter" : { "term": { "generated": timestamp } } }
+    alias_index_pattern = es_index_prefix + '.*'
+    alias_filter = { "filter" : { "term": { "generated": doc_timestamp } } }
     alias_actions = {
         "actions" : [
-            { "remove" : { "index" : es_index_pattern, "alias" : mpid } },
+            { "remove" : { "index" : alias_index_pattern, "alias" : mpid } },
             { "add" : {
-                "index" : es_index_pattern,
+                "index" : alias_index_pattern,
                 "alias" : mpid,
                 "filter": alias_filter['filter']
             } }
@@ -97,7 +97,7 @@ def lambda_handler(event, context):
         es.indices.update_aliases(alias_actions)
     else:
         print("Creating alias for %s" % mpid)
-        es.indices.put_alias(index=es_index_pattern, name=mpid, body=alias_filter)
+        es.indices.put_alias(index=alias_index_pattern, name=mpid, body=alias_filter)
 
 
 if __name__ == '__main__':
@@ -105,11 +105,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--results-file', type=str, required=True)
     parser.add_argument('--es-host', type=str)
-    parser.add_argument('--es-index', type=str)
-    parser.add_argument('--es-index-pattern', type=str)
+    parser.add_argument('--es-index-prefix', type=str)
     args = parser.parse_args()
 
-    for arg in ('es_host', 'es_index', 'es_index_pattern'):
+    for arg in ('es_host', 'es_index_prefix'):
         if getattr(args, arg) is not None:
             os.environ[arg.upper()] = getattr(args, arg)
 
