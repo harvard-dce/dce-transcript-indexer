@@ -1,0 +1,37 @@
+{
+  "order": 0,
+  "template": "transcripts.*",
+  "settings": {},
+  "mappings": {
+    "_default_": {
+      "dynamic_templates": [
+        {
+          "string_fields": {
+            "mapping": {
+              "index": "not_analyzed",
+              "norms": {
+                "enabled": false
+              },
+              "type": "string"
+            },
+            "match_mapping_type": "string",
+            "match": "*"
+          }
+        }
+      ],
+      "properties": {
+        "text": {
+          "index": "analyzed",
+          "type": "string"
+        },
+        "hesitation_length": {
+          "type": "double"
+        }
+      },
+      "_all": {
+        "enabled": false
+      }
+    }
+  },
+  "aliases": {}
+}

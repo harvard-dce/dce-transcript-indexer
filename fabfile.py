@@ -1,6 +1,6 @@
 
 import json
-from os import getenv as env
+from os import path, getenv as env
 from fabric.api import local, task
 from dotenv import load_dotenv, find_dotenv
 
@@ -35,3 +35,13 @@ def package_dev():
 @task
 def package_release():
     _lambda_uploader('release', 'stable release', False)
+
+@task
+def put_template():
+    from function import es_connection
+    es = es_connection()
+    index_prefix = env('ES_INDEX_PREFIX', 'transcripts')
+    with open(path.join(path.abspath(path.dirname(__file__)), 'index_template.json')) as f:
+        template_body = json.load(f)
+    template_body['template'] = index_prefix + '.*'
+    es.indices.put_template(index_prefix, body=template_body, create=True)

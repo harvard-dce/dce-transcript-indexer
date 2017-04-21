@@ -5,10 +5,9 @@ import json
 import boto3
 import jmespath
 import argparse
+from os import getenv as env
 from datetime import datetime
 from elasticsearch import Elasticsearch, helpers, RequestsHttpConnection
-
-s3 = boto3.resource('s3')
 
 def generate_docs(source_data, timestamp, index_name):
 
@@ -17,8 +16,11 @@ def generate_docs(source_data, timestamp, index_name):
 
         text = caption['transcript']
         confidence = caption['confidence']
-        inpoint = int(caption['timestamps'][0][1])
-        outpoint = int(caption['timestamps'][-1][2])
+        inpoint = caption['timestamps'][0][1]
+        outpoint = caption['timestamps'][-1][2]
+
+        hesitations = [x for x in caption['timestamps'] if x[0] == '%HESITATION']
+        hesitation_length = round(sum([x[2] - x[1] for x in hesitations]), 2)
 
         yield {
             '_index': index_name,
@@ -29,20 +31,39 @@ def generate_docs(source_data, timestamp, index_name):
             'text': text,
             'confidence': confidence,
             'inpoint': inpoint,
-            'outpoint': outpoint
+            'outpoint': outpoint,
+            'length': round(outpoint - inpoint, 2),
+            'hesitations': len(hesitations),
+            'hesitation_length': hesitation_length
         }
+
+
+def es_connection():
+
+    es_host = env('ES_HOST', 'http://localhost:9200')
+    es_http_auth = env('ES_HTTP_AUTH')
+
+    if es_http_auth is not None:
+        return Elasticsearch(
+            [es_host],
+            connection_class=RequestsHttpConnection,
+            http_auth=tuple(es_http_auth.split(':')),
+            use_ssl=True,
+            verify_certs=False
+        )
+    else:
+        return Elasticsearch(es_host)
 
 
 def lambda_handler(event, context):
 
-    es_host = os.environ.get('ES_HOST', 'http://localhost:9200')
-    es_index_prefix = os.environ.get('ES_INDEX_PREFIX', 'transcripts')
-    es_http_auth = os.environ.get('ES_HTTP_AUTH')
+    es_index_prefix = env('ES_INDEX_PREFIX', 'transcripts')
 
     if 'results_file' in event: # for local testing
         with open(event['results_file'], 'r') as f:
             data = json.load(f)
     else:
+        s3 = boto3.resource('s3')
         bucket_name = event['Records'][0]['s3']['bucket']['name']
         key = event['Records'][0]['s3']['object']['key']
 
@@ -57,17 +78,7 @@ def lambda_handler(event, context):
             print('Error getting object %s from bucket %s: %s' % (key, bucket_name, str(e)))
             raise
 
-    if es_http_auth is not None:
-        es = Elasticsearch(
-            [es_host],
-            connection_class=RequestsHttpConnection,
-            http_auth=tuple(es_http_auth.split(':')),
-            use_ssl=True,
-            verify_certs=False
-       )
-    else:
-        es = Elasticsearch(es_host)
-
+    es = es_connection()
     mpid = data['user_token']
     doc_timestamp = datetime.utcnow().isoformat()
     index_date = datetime.utcnow().strftime('%Y-%m-%d')
