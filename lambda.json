@@ -16,6 +16,6 @@
     "requirements.txt",
     "/*.json"
   ],
-  "timeout": 10,
-  "memory": 128
+  "timeout": 20,
+  "memory": 256
 }

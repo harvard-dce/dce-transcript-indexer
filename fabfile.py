@@ -41,7 +41,8 @@ def put_template():
     from function import es_connection
     es = es_connection()
     index_prefix = env('ES_INDEX_PREFIX', 'transcripts')
+    template_name = 'dce-' + index_prefix
     with open(path.join(path.abspath(path.dirname(__file__)), 'index_template.json')) as f:
         template_body = json.load(f)
     template_body['template'] = index_prefix + '.*'
-    es.indices.put_template(index_prefix, body=template_body, create=True)
+    es.indices.put_template(template_name, body=template_body, create=True)

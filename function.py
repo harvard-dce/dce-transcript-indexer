@@ -18,6 +18,7 @@ def generate_docs(source_data, timestamp, index_name):
         confidence = caption['confidence']
         inpoint = caption['timestamps'][0][1]
         outpoint = caption['timestamps'][-1][2]
+        word_count = len([x for x in caption['timestamps'] if x[0] != '%HESITATION'])
 
         hesitations = [x for x in caption['timestamps'] if x[0] == '%HESITATION']
         hesitation_length = round(sum([x[2] - x[1] for x in hesitations]), 2)
@@ -34,7 +35,8 @@ def generate_docs(source_data, timestamp, index_name):
             'outpoint': outpoint,
             'length': round(outpoint - inpoint, 2),
             'hesitations': len(hesitations),
-            'hesitation_length': hesitation_length
+            'hesitation_length': hesitation_length,
+            'word_count': word_count
         }
 
 
@@ -96,24 +98,34 @@ def lambda_handler(event, context):
         raise
 
     # update the index alias for this mediapackage
+    alias_name = mpid
     alias_index_pattern = es_index_prefix + '.*'
-    alias_filter = { "filter" : { "term": { "generated": doc_timestamp } } }
+    alias_filter = {
+        "filter" : {
+            'bool': {
+                "must": [
+                    { "term": { "generated": doc_timestamp } },
+                    { "term": { "mpid": mpid } }
+                ]
+            }
+        }
+    }
     alias_actions = {
         "actions" : [
-            { "remove" : { "index" : alias_index_pattern, "alias" : mpid } },
+            { "remove" : { "index" : alias_index_pattern, "alias" : alias_name } },
             { "add" : {
                 "index" : alias_index_pattern,
-                "alias" : mpid,
+                "alias" : alias_name,
                 "filter": alias_filter['filter']
             } }
         ]
     }
-    if es.indices.exists_alias(name=mpid):
-        print("Updating alias for %s" % mpid)
+    if es.indices.exists_alias(name=alias_name):
+        print("Updating alias %s" % alias_name)
         es.indices.update_aliases(alias_actions)
     else:
-        print("Creating alias for %s" % mpid)
-        es.indices.put_alias(index=alias_index_pattern, name=mpid, body=alias_filter)
+        print("Creating alias %s" % alias_name)
+        es.indices.put_alias(index=alias_index_pattern, name=alias_name, body=alias_filter)
 
 
 if __name__ == '__main__':
