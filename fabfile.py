@@ -10,7 +10,7 @@ def _lambda_uploader(alias, alias_desc, upload=True):
     variables = {
         "ES_HOST": env('ES_HOST'),
         "ES_HTTP_AUTH": env('ES_HTTP_AUTH'),
-        "ES_INDEX_PREFIX": env('ES_INDEX_PREFIX')
+        "ES_INDEX_NAME": env('ES_INDEX_NAME')
     }
     cmd = ('lambda-uploader -V --profile ${AWS_DEFAULT_PROFILE} '
           '--role ${TRANSCRIPT_INDEXER_LAMBDA_ROLE} '
@@ -40,9 +40,9 @@ def package_release():
 def put_template():
     from function import es_connection
     es = es_connection()
-    index_prefix = env('ES_INDEX_PREFIX', 'transcripts')
-    template_name = 'dce-' + index_prefix
+    index_name = env('ES_INDEX_NAME', 'transcripts')
+    template_name = 'dce-' + index_name
     with open(path.join(path.abspath(path.dirname(__file__)), 'index_template.json')) as f:
         template_body = json.load(f)
-    template_body['template'] = index_prefix + '.*'
+    template_body['template'] = index_name
     es.indices.put_template(template_name, body=template_body, create=True)

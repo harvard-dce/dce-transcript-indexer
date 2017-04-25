@@ -51,7 +51,9 @@ def es_connection():
             connection_class=RequestsHttpConnection,
             http_auth=tuple(es_http_auth.split(':')),
             use_ssl=True,
-            verify_certs=False
+            verify_certs=False,
+            retry_on_timeout=True,
+            timeout=30
         )
     else:
         return Elasticsearch(es_host)
@@ -59,7 +61,7 @@ def es_connection():
 
 def lambda_handler(event, context):
 
-    es_index_prefix = env('ES_INDEX_PREFIX', 'transcripts')
+    es_index_name = env('ES_INDEX_NAME', 'transcripts')
 
     if 'results_file' in event: # for local testing
         with open(event['results_file'], 'r') as f:
@@ -85,10 +87,8 @@ def lambda_handler(event, context):
     try:
         mpid = data['user_token']
         doc_timestamp = datetime.utcnow().isoformat()
-        index_date = datetime.utcnow().strftime('%Y-%m-%d')
-        index_name = es_index_prefix + '.' + index_date
 
-        res = helpers.bulk(es, generate_docs(data, doc_timestamp, index_name))
+        res = helpers.bulk(es, generate_docs(data, doc_timestamp, es_index_name))
         print("Indexed %d captions for mediapackage %s" % (res[0], mpid))
     except Exception as e:
         if isinstance(e, KeyError) and 'user_token' in str(e):
@@ -99,7 +99,6 @@ def lambda_handler(event, context):
 
     # update the index alias for this mediapackage
     alias_name = mpid
-    alias_index_pattern = es_index_prefix + '.*'
     alias_filter = {
         "filter" : {
             'bool': {
@@ -112,9 +111,9 @@ def lambda_handler(event, context):
     }
     alias_actions = {
         "actions" : [
-            { "remove" : { "index" : alias_index_pattern, "alias" : alias_name } },
+            { "remove" : { "index" : es_index_name, "alias" : alias_name } },
             { "add" : {
-                "index" : alias_index_pattern,
+                "index" : es_index_name,
                 "alias" : alias_name,
                 "filter": alias_filter['filter']
             } }
@@ -125,7 +124,7 @@ def lambda_handler(event, context):
         es.indices.update_aliases(alias_actions)
     else:
         print("Creating alias %s" % alias_name)
-        es.indices.put_alias(index=alias_index_pattern, name=alias_name, body=alias_filter)
+        es.indices.put_alias(index=es_index_name, name=alias_name, body=alias_filter)
 
 
 if __name__ == '__main__':
@@ -134,10 +133,10 @@ if __name__ == '__main__':
     parser.add_argument('--results-file', type=str, required=True)
     parser.add_argument('--es-host', type=str)
     parser.add_argument('--es-http-auth', type=str)
-    parser.add_argument('--es-index-prefix', type=str)
+    parser.add_argument('--es-index-name', type=str)
     args = parser.parse_args()
 
-    for arg in ('es_host', 'es_index_prefix', 'es_http_auth'):
+    for arg in ('es_host', 'es_index_name', 'es_http_auth'):
         if getattr(args, arg) is not None:
             os.environ[arg.upper()] = getattr(args, arg)
 
