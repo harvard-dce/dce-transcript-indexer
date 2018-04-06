@@ -1,0 +1,106 @@
+AWSTemplateFormatVersion : '2010-09-09'
+Description: "DCE Transcript Indexer: S3 -> Lambda -> Elasticsearch"
+
+Parameters:
+  VpcSubnetId:
+    Type: String
+  VpcSecurityGroupId:
+    Type: String
+  LambdaCodeBucket:
+    Type: String
+  ElasticsearchHost:
+    Type: String
+  ElasticsearchTranscriptIndex:
+    Type: String
+  NotificationEmail:
+    Type: String
+  TranscriptBucket:
+    Type: String
+
+Resources:
+  TranscriptIndexerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.6
+      Handler: function.handler
+      FunctionName: !Ref AWS::StackName
+      Role: !GetAtt [TranscriptIndexerRole, Arn]
+      Timeout: 30
+      Code:
+        S3Bucket: !Ref LambdaCodeBucket
+        S3Key: !Sub "${AWS::StackName}-function.zip"
+      Environment:
+        Variables:
+          ES_HOST: !Ref ElasticsearchHost
+          ES_TRANSCRIPT_INDEX: !Ref ElasticsearchTranscriptIndex
+      VpcConfig:
+        SubnetIds:
+          - !Ref VpcSubnetId
+        SecurityGroupIds:
+          - !Ref VpcSecurityGroupId
+
+  TranscriptIndexerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Action: sts:AssumeRole
+          Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+        - "arn:aws:iam::aws:policy/CloudWatchFullAccess"
+        - "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:*"
+                Resource: !Sub "arn:aws:s3:::${TranscriptBucket}"
+              - Effect: "Allow"
+                Action:
+                  - "s3:*"
+                Resource: !Sub "arn:aws:s3:::${TranscriptBucket}/*"
+              - Effect: "Allow"
+                Action:
+                  - "sns:*"
+                Resource: !Ref TranscriptIndexerNotificationTopic
+
+  TrancscriptBucketLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AWS::StackName
+      Action: "lambda:InvokeFunction"
+      Principal: "s3.amazonaws.com"
+      SourceArn: !Sub "arn:aws:s3::::${TranscriptBucket}"
+
+  TranscriptIndexerNotificationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub "${AWS::StackName}-notification-topic"
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref NotificationEmail
+
+  TranscriptIndexerErrorsMetricAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: "Fire alarm on any function errors"
+      AlarmActions:
+        - !Ref TranscriptIndexerNotificationTopic
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref TranscriptIndexerFunction
+      Namespace: AWS/Lambda
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      Statistic: Sum

@@ -1,13 +1,21 @@
-from __future__ import print_function
-
-import os
+import argparse
 import json
 import boto3
 import jmespath
-import argparse
+import logging
+import aws_lambda_logging
 from os import getenv as env
 from datetime import datetime
 from elasticsearch import Elasticsearch, helpers, RequestsHttpConnection
+
+LOG_LEVEL = env('LOG_LEVEL', 'INFO')
+BOTO_LOG_LEVEL = env('BOTO_LOG_LEVEL', 'INFO')
+ES_HOST = env('ES_HOST', 'http://localhost:9200')
+ES_TRANSCRIPT_INDEX = env('ES_TRANSCRIPT_INDEX', 'transcripts')
+
+logger = logging.getLogger()
+s3 = boto3.resource('s3')
+
 
 def generate_docs(source_data, timestamp, index_name):
 
@@ -42,45 +50,36 @@ def generate_docs(source_data, timestamp, index_name):
 
 def es_connection():
 
-    es_host = env('ES_HOST', 'http://localhost:9200')
-    es_http_auth = env('ES_HTTP_AUTH')
+    use_ssl = ES_HOST.startswith('https')
 
-    if es_http_auth is not None:
-        return Elasticsearch(
-            [es_host],
-            connection_class=RequestsHttpConnection,
-            http_auth=tuple(es_http_auth.split(':')),
-            use_ssl=True,
-            verify_certs=False,
-            retry_on_timeout=True,
-            timeout=30
-        )
-    else:
-        return Elasticsearch(es_host)
+    return Elasticsearch(
+        [ES_HOST],
+        use_ssl=use_ssl,
+        verify_certs=False,
+        timeout=30
+    )
 
 
-def lambda_handler(event, context):
+def handler(event, context):
 
-    es_index_name = env('ES_INDEX_NAME', 'transcripts')
+    aws_lambda_logging.setup(LOG_LEVEL, boto_level=BOTO_LOG_LEVEL)
 
-    if 'results_file' in event: # for local testing
-        with open(event['results_file'], 'r') as f:
-            data = json.load(f)
-    else:
-        s3 = boto3.resource('s3')
-        bucket_name = event['Records'][0]['s3']['bucket']['name']
-        key = event['Records'][0]['s3']['object']['key']
+    logger.info(event)
+    logger.info(context.__dict__)
 
-        if not key.endswith('.json'):
-            print("%s doesn't look like a transcript results file. Aborting." % key)
-            return
+    bucket_name = event['Records'][0]['s3']['bucket']['name']
+    key = event['Records'][0]['s3']['object']['key']
 
-        try:
-            obj = s3.Object(bucket_name, key).get()
-            data = json.load(obj['Body'])
-        except Exception as e:
-            print('Error getting object %s from bucket %s: %s' % (key, bucket_name, str(e)))
-            raise
+    if not key.endswith('.json'):
+        logger.info("%s doesn't look like a transcript results file. Aborting." % key)
+        return
+
+    try:
+        obj = s3.Object(bucket_name, key).get()
+        data = json.load(obj['Body'])
+    except Exception as e:
+        logger.info('Error getting object %s from bucket %s: %s' % (key, bucket_name, str(e)))
+        raise
 
     es = es_connection()
 
@@ -88,13 +87,13 @@ def lambda_handler(event, context):
         mpid = data['user_token']
         doc_timestamp = datetime.utcnow().isoformat()
 
-        res = helpers.bulk(es, generate_docs(data, doc_timestamp, es_index_name))
-        print("Indexed %d captions for mediapackage %s" % (res[0], mpid))
+        res = helpers.bulk(es, generate_docs(data, doc_timestamp, ES_TRANSCRIPT_INDEX))
+        logger.info("Indexed %d captions for mediapackage %s" % (res[0], mpid))
     except Exception as e:
         if isinstance(e, KeyError) and 'user_token' in str(e):
-            print("Results object %s is missing the 'user_token'" % data['id'])
+            logger.error("Results object %s is missing the 'user_token'" % data['id'])
         else:
-            print("Indexing of results object %s failed: %s" % (data['id'], str(e)))
+            logger.exception("Indexing of results object %s failed" % data['id'])
         raise
 
     # update the index alias for this mediapackage
@@ -111,33 +110,30 @@ def lambda_handler(event, context):
     }
     alias_actions = {
         "actions" : [
-            { "remove" : { "index" : es_index_name, "alias" : alias_name } },
+            { "remove" : { "index" : ES_TRANSCRIPT_INDEX, "alias" : alias_name } },
             { "add" : {
-                "index" : es_index_name,
+                "index" : ES_TRANSCRIPT_INDEX,
                 "alias" : alias_name,
                 "filter": alias_filter['filter']
             } }
         ]
     }
     if es.indices.exists_alias(name=alias_name):
-        print("Updating alias %s" % alias_name)
+        logger.info("Updating alias %s" % alias_name)
         es.indices.update_aliases(alias_actions)
     else:
-        print("Creating alias %s" % alias_name)
-        es.indices.put_alias(index=es_index_name, name=alias_name, body=alias_filter)
+        logger.info("Creating alias %s" % alias_name)
+        es.indices.put_alias(index=ES_TRANSCRIPT_INDEX, name=alias_name, body=alias_filter)
 
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--results-file', type=str, required=True)
-    parser.add_argument('--es-host', type=str)
-    parser.add_argument('--es-http-auth', type=str)
-    parser.add_argument('--es-index-name', type=str)
+    parser.add_argument('--event', type=argparse.FileType('r'), required=True)
     args = parser.parse_args()
 
-    for arg in ('es_host', 'es_index_name', 'es_http_auth'):
-        if getattr(args, arg) is not None:
-            os.environ[arg.upper()] = getattr(args, arg)
+    class FakeContext:
+        pass
 
-    lambda_handler({'results_file': args.results_file}, None)
+    event_data = json.load(args.event)
+    handler(event_data, FakeContext())

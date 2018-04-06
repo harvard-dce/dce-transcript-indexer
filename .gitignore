@@ -76,7 +76,9 @@ target/
 celerybeat-schedule
 
 # dotenv
-*.env
+prod.env
+dev.env
+.env
 
 # virtualenv
 venv/
@@ -87,3 +89,8 @@ ENV/
 
 # Rope project settings
 .ropeproject
+
+data/
+
+*.zip
+reindex.out

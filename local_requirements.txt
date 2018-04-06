@@ -1,6 +1,0 @@
-boto3
-Fabric3
-requests
-elasticsearch
-lambda-uploader
-python-dotenv

@@ -1,0 +1,14 @@
+{
+  "Records": [
+    {
+      "s3": {
+        "bucket": {
+          "name": "dce-ibm-watson-transcripts"
+        },
+        "object": {
+          "key": "000f7b52_383d_11e8_9111_f34d5c6454f4.json"
+        }
+      }
+    }
+  ]
+}
