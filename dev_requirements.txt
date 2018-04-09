@@ -1,6 +1,0 @@
-boto3
-arrow
-invoke
-python-dotenv
--r requirements.txt
-

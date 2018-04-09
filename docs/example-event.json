@@ -1,14 +1,5 @@
 {
-  "Records": [
-    {
-      "s3": {
-        "bucket": {
-          "name": "dce-ibm-watson-transcripts"
-        },
-        "object": {
-          "key": "000f7b52_383d_11e8_9111_f34d5c6454f4.json"
-        }
-      }
-    }
-  ]
+  "captionsUrl": "https://dvgni8clk4vbh.cloudfront.net/engage-player/e19bd255-4a6b-4c63-bea7-08419d9771d7/7b7e138c-72e2-4a15-9cef-ba798b34f541/captions_.xml",
+  "mpid": "e19bd255-4a6b-4c63-bea7-08419d9771d7",
+  "seriesId": "20190114296"
 }

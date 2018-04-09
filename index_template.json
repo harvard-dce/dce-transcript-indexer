@@ -1,31 +1,61 @@
 {
   "order": 0,
-  "template": "transcripts",
-  "settings": {},
+  "index_patterns": ["*-transcripts"],
+  "settings": {
+    "analysis": {
+      "analyzer": {
+        "caption_analyzer": {
+          "type":      "custom",
+          "tokenizer": "standard",
+          "filter": [
+            "standard",
+            "lowercase",
+            "caption_stemmer"
+          ]
+        }
+      },
+      "filter" : {
+        "caption_stemmer" : {
+          "type" : "stemmer",
+          "name" : "english"
+        }
+      }
+    }
+  },
   "mappings": {
-    "_default_": {
+    "_doc": {
       "dynamic_templates": [
         {
           "string_fields": {
-            "mapping": {
-              "index": "not_analyzed",
-              "norms": {
-                "enabled": false
-              },
-              "type": "string"
-            },
             "match_mapping_type": "string",
-            "match": "*"
+            "match": "*",
+            "mapping": {
+              "type": "keyword",
+              "index": true,
+              "norms": false
+            }
           }
         }
       ],
       "properties": {
         "text": {
-          "index": "analyzed",
-          "type": "string"
+          "type": "text",
+          "index": true,
+          "store": false,
+          "analyzer": "caption_analyzer"
         },
-        "hesitation_length": {
-          "type": "double"
+        "captions": {
+          "type": "nested",
+          "properties": {
+            "text": {
+              "type": "text",
+              "store": true,
+              "index": true,
+              "norms": false,
+              "term_vector": "with_positions_offsets",
+              "analyzer": "caption_analyzer"
+            }
+          }
         }
       },
       "_all": {

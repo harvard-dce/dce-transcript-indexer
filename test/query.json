@@ -1,0 +1,38 @@
+{
+  "query": {
+    "bool": {
+      "should": [
+        {
+          "query_string": {
+            "default_field": "text",
+            "query": "\"some games\""
+          }
+        },
+        {
+          "nested": {
+            "path": "captions",
+            "query": {
+              "match": {
+                "captions.text": "some games"
+              }
+            },
+            "inner_hits": {
+              "size": 10,
+              "highlight": {
+                "fields": {
+                  "captions.text": {
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
+  "highlight": {
+    "fields": {
+      "text": {}
+    }
+  }
+}

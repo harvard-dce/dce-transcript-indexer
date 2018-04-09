@@ -1,43 +1,100 @@
 AWSTemplateFormatVersion : '2010-09-09'
-Description: "DCE Transcript Indexer: S3 -> Lambda -> Elasticsearch"
+Description: "DCE Transcript Indexer"
 
 Parameters:
-  VpcSubnetId:
-    Type: String
-  VpcSecurityGroupId:
+  CidrBlock:
     Type: String
   LambdaCodeBucket:
     Type: String
-  ElasticsearchHost:
-    Type: String
-  ElasticsearchTranscriptIndex:
-    Type: String
   NotificationEmail:
     Type: String
-  TranscriptBucket:
+  ElasticsearchInstanceType:
     Type: String
+    Default: t2.small.elasticsearch
 
 Resources:
+
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref CidrBlock
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName}-vpc"
+
+  FlowLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "${AWS::StackName}-vpc-flowlog"
+      RetentionInDays: 30
+
+  VPCFlowLog:
+    Type: AWS::EC2::FlowLog
+    Properties:
+      DeliverLogsPermissionArn: !GetAtt TranscriptIndexerRole.Arn
+      LogGroupName: !Ref FlowLogGroup
+      ResourceId: !Ref VPC
+      ResourceType: VPC
+      TrafficType: ALL
+
+  PrivateSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: !Ref CidrBlock
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName} private subnet"
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName} route table"
+
+  PrivateSubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnet
+      RouteTableId: !Ref PrivateRouteTable
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref VPC
+      GroupDescription: "Elasticsearch Security Group"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 10.0.0.0/8
+      Tags:
+        - Key: Name
+          Value: !Sub "${AWS::StackName} elasticsearch security group"
+
   TranscriptIndexerFunction:
     Type: AWS::Lambda::Function
+    DependsOn: TranscriptIndexerES
     Properties:
       Runtime: python3.6
       Handler: function.handler
-      FunctionName: !Ref AWS::StackName
+      FunctionName: !Sub "${AWS::StackName}-function"
       Role: !GetAtt [TranscriptIndexerRole, Arn]
       Timeout: 30
       Code:
         S3Bucket: !Ref LambdaCodeBucket
-        S3Key: !Sub "${AWS::StackName}-function.zip"
+        S3Key: !Sub "dce-transcript-indexer/${AWS::StackName}-function.zip"
       Environment:
         Variables:
-          ES_HOST: !Ref ElasticsearchHost
-          ES_TRANSCRIPT_INDEX: !Ref ElasticsearchTranscriptIndex
+          ES_HOST: !Sub "https://${TranscriptIndexerES.DomainEndpoint}"
       VpcConfig:
         SubnetIds:
-          - !Ref VpcSubnetId
+          - !Ref PrivateSubnet
         SecurityGroupIds:
-          - !Ref VpcSecurityGroupId
+          - !GetAtt [SecurityGroup, GroupId]
 
   TranscriptIndexerRole:
     Type: AWS::IAM::Role
@@ -61,24 +118,8 @@ Resources:
             Statement:
               - Effect: "Allow"
                 Action:
-                  - "s3:*"
-                Resource: !Sub "arn:aws:s3:::${TranscriptBucket}"
-              - Effect: "Allow"
-                Action:
-                  - "s3:*"
-                Resource: !Sub "arn:aws:s3:::${TranscriptBucket}/*"
-              - Effect: "Allow"
-                Action:
                   - "sns:*"
                 Resource: !Ref TranscriptIndexerNotificationTopic
-
-  TrancscriptBucketLambdaPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref AWS::StackName
-      Action: "lambda:InvokeFunction"
-      Principal: "s3.amazonaws.com"
-      SourceArn: !Sub "arn:aws:s3::::${TranscriptBucket}"
 
   TranscriptIndexerNotificationTopic:
     Type: AWS::SNS::Topic
@@ -87,6 +128,44 @@ Resources:
       Subscription:
         - Protocol: email
           Endpoint: !Ref NotificationEmail
+
+  TranscriptIndexerES:
+    Type: AWS::Elasticsearch::Domain
+    Properties:
+      DomainName: !Sub "${AWS::StackName}-es"
+      ElasticsearchVersion: "6.7"
+      EBSOptions:
+        VolumeSize: 20
+        VolumeType: gp2
+        EBSEnabled: true
+      ElasticsearchClusterConfig:
+        InstanceCount: 1
+        InstanceType: !Ref ElasticsearchInstanceType
+        DedicatedMasterEnabled: false
+      SnapshotOptions:
+        AutomatedSnapshotStartHour: 6
+      AdvancedOptions:
+        rest.action.multi.allow_explicit_index: "true"
+      Tags:
+        - Key: Project
+          Value: "MH"
+        - Key: OU
+          Value: "DE"
+        - Key: dce-transcript-indexer
+          Value: "1"
+      AccessPolicies:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              AWS: '*'
+            Action: 'es:*'
+            Resource: !Sub "arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${AWS::StackName}-es/*"
+      VPCOptions:
+        SubnetIds:
+          - !Ref PrivateSubnet
+        SecurityGroupIds:
+          - !GetAtt [SecurityGroup, GroupId]
 
   TranscriptIndexerErrorsMetricAlarm:
     Type: AWS::CloudWatch::Alarm
@@ -104,3 +183,15 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 1
       Statistic: Sum
+
+Outputs:
+  DomainArn:
+    Value: !GetAtt TranscriptIndexerES.DomainArn
+  DomainEndpoint:
+    Value: !GetAtt TranscriptIndexerES.DomainEndpoint
+  VpcCidrBlock:
+    Value: !GetAtt VPC.CidrBlock
+  PrivateSubnetId:
+    Value: !Ref PrivateSubnet
+  SecurityGroupId:
+    Value: !GetAtt SecurityGroup.GroupId
