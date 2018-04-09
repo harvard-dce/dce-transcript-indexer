@@ -1,0 +1,8 @@
+awscli
+boto3
+invoke
+python-dotenv
+parameter-store-environ
+cfn-lint
+-r function_requirements.txt
+

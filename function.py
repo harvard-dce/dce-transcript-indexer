@@ -1,139 +1,136 @@
 import argparse
+import ssl
 import json
-import boto3
-import jmespath
+from botocore.vendored import requests
 import logging
 import aws_lambda_logging
-from os import getenv as env
-from datetime import datetime
-from elasticsearch import Elasticsearch, helpers, RequestsHttpConnection
+from os import path, getenv as env
+from datetime import datetime, timedelta
+from elasticsearch import Elasticsearch
+from elasticsearch.connection import create_ssl_context
+import xml.etree.ElementTree as ET
+
+import urllib3
+urllib3.disable_warnings()
 
 LOG_LEVEL = env('LOG_LEVEL', 'INFO')
 BOTO_LOG_LEVEL = env('BOTO_LOG_LEVEL', 'INFO')
-ES_HOST = env('ES_HOST', 'http://localhost:9200')
-ES_TRANSCRIPT_INDEX = env('ES_TRANSCRIPT_INDEX', 'transcripts')
+ES_HOST = env('ES_HOST', 'https://localhost:9200')
+LAMBDA_TASK_ROOT = env('LAMBDA_TASK_ROOT')
+CAPTIONS_XML_NS = {'ttaf1': 'http://www.w3.org/2006/04/ttaf1'}
 
 logger = logging.getLogger()
-s3 = boto3.resource('s3')
 
+def es_connection(host=ES_HOST):
 
-def generate_docs(source_data, timestamp, index_name):
-
-    query = 'results[*].results[*] | [].alternatives | []'
-    for caption in jmespath.search(query, source_data):
-
-        text = caption['transcript']
-        confidence = caption['confidence']
-        inpoint = caption['timestamps'][0][1]
-        outpoint = caption['timestamps'][-1][2]
-        word_count = len([x for x in caption['timestamps'] if x[0] != '%HESITATION'])
-
-        hesitations = [x for x in caption['timestamps'] if x[0] == '%HESITATION']
-        hesitation_length = round(sum([x[2] - x[1] for x in hesitations]), 2)
-
-        yield {
-            '_index': index_name,
-            '_type': 'caption',
-            'transcript_id': source_data['id'],
-            'generated': timestamp,
-            'mpid': source_data['user_token'],
-            'text': text,
-            'confidence': confidence,
-            'inpoint': inpoint,
-            'outpoint': outpoint,
-            'length': round(outpoint - inpoint, 2),
-            'hesitations': len(hesitations),
-            'hesitation_length': hesitation_length,
-            'word_count': word_count
-        }
-
-
-def es_connection():
-
-    use_ssl = ES_HOST.startswith('https')
+    ssl_context = create_ssl_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
 
     return Elasticsearch(
-        [ES_HOST],
-        use_ssl=use_ssl,
-        verify_certs=False,
+        [host],
+        scheme="https",
+        ssl_context=ssl_context,
         timeout=30
     )
 
+es = es_connection()
+
+
+def init_index_template():
+    template_path = path.join(LAMBDA_TASK_ROOT, 'index_template.json')
+    with open(template_path, 'r') as f:
+        template_body = json.load(f)
+    put_template_params = {
+        "name": "transcripts",
+        "create": True,
+        "body": template_body
+    }
+    resp = es.indices.put_template(**put_template_params)
+    logger.info("put template response: {}".format(resp))
+    return resp
+
+class InvalidTranscriptIndexName(Exception):
+    pass
 
 def handler(event, context):
 
     aws_lambda_logging.setup(LOG_LEVEL, boto_level=BOTO_LOG_LEVEL)
 
+    # one-time index template setup handling
+    if "init_index_template" in event:
+        return init_index_template()
+
+    index_name = event["indexName"]
+    captions_url = event["captionsUrl"]
+    mpid = event["mpid"]
+    series_id = event["seriesId"]
+
     logger.info(event)
-    logger.info(context.__dict__)
 
-    bucket_name = event['Records'][0]['s3']['bucket']['name']
-    key = event['Records'][0]['s3']['object']['key']
-
-    if not key.endswith('.json'):
-        logger.info("%s doesn't look like a transcript results file. Aborting." % key)
-        return
+    if not index_name.endswith("-transcripts"):
+        raise InvalidTranscriptIndexName("Index name must match *-transcrips")
 
     try:
-        obj = s3.Object(bucket_name, key).get()
-        data = json.load(obj['Body'])
+        resp = requests.get(captions_url)
+        resp.raise_for_status()
     except Exception as e:
-        logger.info('Error getting object %s from bucket %s: %s' % (key, bucket_name, str(e)))
+        logger.exception("Error getting from {}: {}".format(captions_url, e))
         raise
 
-    es = es_connection()
+    xml_str = resp.content
+    root = ET.fromstring(xml_str)
+    captions = root.findall('.//ttaf1:p', namespaces=CAPTIONS_XML_NS)
+
+    doc = {
+        "mpid": mpid,
+        "series_id": series_id,
+        "text": "",
+        "captions": [],
+        "index_ts": datetime.utcnow().isoformat()
+    }
+
+    for cap in captions:
+        begin = cap.attrib['begin']
+        (hours, minutes, seconds) = (float(x) for x in begin.split(':'))
+        td = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+        doc['text'] += cap.text + " "
+        doc['captions'].append({
+            'text': cap.text,
+            'begin': td.seconds
+        })
+
+    logger.debug(doc)
 
     try:
-        mpid = data['user_token']
-        doc_timestamp = datetime.utcnow().isoformat()
+        resp = es.index(
+            index=index_name,
+            doc_type="_doc",
+            body=doc
+        )
+        logger.debug({'index response': resp})
 
-        res = helpers.bulk(es, generate_docs(data, doc_timestamp, ES_TRANSCRIPT_INDEX))
-        logger.info("Indexed %d captions for mediapackage %s" % (res[0], mpid))
     except Exception as e:
-        if isinstance(e, KeyError) and 'user_token' in str(e):
-            logger.error("Results object %s is missing the 'user_token'" % data['id'])
-        else:
-            logger.exception("Indexing of results object %s failed" % data['id'])
+        logger.exception("Indexing to {} failed: {}".format(index_name, e))
         raise
-
-    # update the index alias for this mediapackage
-    alias_name = mpid
-    alias_filter = {
-        "filter" : {
-            'bool': {
-                "must": [
-                    { "term": { "generated": doc_timestamp } },
-                    { "term": { "mpid": mpid } }
-                ]
-            }
-        }
-    }
-    alias_actions = {
-        "actions" : [
-            { "remove" : { "index" : ES_TRANSCRIPT_INDEX, "alias" : alias_name } },
-            { "add" : {
-                "index" : ES_TRANSCRIPT_INDEX,
-                "alias" : alias_name,
-                "filter": alias_filter['filter']
-            } }
-        ]
-    }
-    if es.indices.exists_alias(name=alias_name):
-        logger.info("Updating alias %s" % alias_name)
-        es.indices.update_aliases(alias_actions)
-    else:
-        logger.info("Creating alias %s" % alias_name)
-        es.indices.put_alias(index=ES_TRANSCRIPT_INDEX, name=alias_name, body=alias_filter)
 
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--event', type=argparse.FileType('r'), required=True)
+    parser.add_argument('--url', required=True)
+    parser.add_argument('--mpid', required=True)
+    parser.add_argument('--series-id', required=True)
+    parser.add_argument('--index-name', required=True)
     args = parser.parse_args()
 
     class FakeContext:
         pass
 
-    event_data = json.load(args.event)
+    event_data = {
+        "captionsUrl": args.url,
+        "mpid": args.mpid,
+        "seriesId": args.series_id,
+        "indexName": args.index_name
+    }
     handler(event_data, FakeContext())
