@@ -19,6 +19,7 @@ Resources:
     Properties:
       CidrBlock: !Ref CidrBlock
       EnableDnsSupport: true
+      EnableDnsHostnames: true
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName}-vpc"
@@ -74,6 +75,15 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "${AWS::StackName} elasticsearch security group"
+
+  VPCS3Endpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Properties:
+      VpcEndpointType: Gateway
+      VpcId: !Ref VPC
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      RouteTableIds:
+        - !Ref PrivateRouteTable
 
   TranscriptIndexerFunction:
     Type: AWS::Lambda::Function
