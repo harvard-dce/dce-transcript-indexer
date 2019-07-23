@@ -31,7 +31,7 @@ def es_connection(host=ES_HOST):
         [host],
         scheme="https",
         ssl_context=ssl_context,
-        timeout=30
+        timeout=5
     )
 
 es = es_connection()
@@ -72,7 +72,7 @@ def handler(event, context):
         raise InvalidTranscriptIndexName("Index name must match *-transcrips")
 
     try:
-        resp = requests.get(captions_url)
+        resp = requests.get(captions_url, timeout=5)
         resp.raise_for_status()
     except Exception as e:
         logger.exception("Error getting from {}: {}".format(captions_url, e))
@@ -82,6 +82,7 @@ def handler(event, context):
     root = ET.fromstring(xml_str)
     captions = root.findall('.//ttaf1:p', namespaces=CAPTIONS_XML_NS)
 
+    doc_id = "{}-{}".format(mpid, series_id)
     doc = {
         "mpid": mpid,
         "series_id": series_id,
@@ -104,6 +105,7 @@ def handler(event, context):
 
     try:
         resp = es.index(
+            id=doc_id,
             index=index_name,
             doc_type="_doc",
             body=doc
