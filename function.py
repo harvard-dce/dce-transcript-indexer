@@ -1,9 +1,10 @@
-import argparse
+import re
 import ssl
 import json
-from botocore.vendored import requests
+import argparse
 import logging
 import aws_lambda_logging
+from botocore.vendored import requests
 from os import path, getenv as env
 from datetime import datetime, timedelta
 from elasticsearch import Elasticsearch
@@ -18,6 +19,7 @@ BOTO_LOG_LEVEL = env('BOTO_LOG_LEVEL', 'INFO')
 ES_HOST = env('ES_HOST', 'https://localhost:9200')
 LAMBDA_TASK_ROOT = env('LAMBDA_TASK_ROOT')
 CAPTIONS_XML_NS = {'ttaf1': 'http://www.w3.org/2006/04/ttaf1'}
+TAB_NEWLINE_REPLACE = re.compile("[\\n\\t]+")
 
 logger = logging.getLogger()
 
@@ -78,7 +80,8 @@ def handler(event, context):
         logger.exception("Error getting from {}: {}".format(captions_url, e))
         raise
 
-    xml_str = resp.content
+    xml_str = resp.text
+    xml_str = TAB_NEWLINE_REPLACE.sub(" ", xml_str)
     root = ET.fromstring(xml_str)
     captions = root.findall('.//ttaf1:p', namespaces=CAPTIONS_XML_NS)
 
@@ -92,12 +95,14 @@ def handler(event, context):
     }
 
     for cap in captions:
+        if cap.text is None:
+            continue
         begin = cap.attrib['begin']
         (hours, minutes, seconds) = (float(x) for x in begin.split(':'))
         td = timedelta(hours=hours, minutes=minutes, seconds=seconds)
         doc['text'] += cap.text + " "
         doc['captions'].append({
-            'text': cap.text,
+            'text': cap.text.strip(),
             'begin': td.seconds
         })
 
