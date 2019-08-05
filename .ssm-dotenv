@@ -1,0 +1,13 @@
+project = "dce-transcript-indexer"
+stage = "default"
+
+[schema]
+STACK_NAME = "String"
+NOTIFICATION_EMAIL = "String"
+ES_INSTANCE_TYPE = "String"
+LAMBDA_CODE_BUCKET = "String"
+
+[tags]
+ssm-dotenv = "1"
+Project = "MH"
+OU = "DE"
