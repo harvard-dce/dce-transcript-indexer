@@ -2,7 +2,6 @@ awscli
 boto3
 invoke
 python-dotenv
-parameter-store-environ
-cfn-lint
+ssm-dotenv
 -r function_requirements.txt
 
