@@ -2,10 +2,10 @@ project = "dce-transcript-indexer"
 stage = "default"
 
 [schema]
-STACK_NAME = "String"
-NOTIFICATION_EMAIL = "String"
-ES_INSTANCE_TYPE = "String"
-LAMBDA_CODE_BUCKET = "String"
+STACK_NAME = ["String", "Name of the cloudformation stack / prefix for stack resources"]
+NOTIFICATION_EMAIL = ["String", "where to send alerts"]
+ES_INSTANCE_TYPE = ["String", "aws elasticsearch instance type to use"]
+LAMBDA_CODE_BUCKET = ["String", "bucket for uploading packaged lambda code"]
 
 [tags]
 ssm-dotenv = "1"
