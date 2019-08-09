@@ -2,9 +2,11 @@
 
 AWS cloudformation stack to provide an Opencast transcript indexing/searching service
 
-This project sets up a Cloudformatoin stack containing the following:
+This project sets up a CloudFormation stack containing the following:
 
 * VPC containing one private subnet and one security group
+* A VPC Endpoint to allow services within the vpc (e.g. lambda functions) to access s3
+  without needing to go through a NAT gateway
 * Single-node ElasticSearch instance within the VPC
 * python 3.6 Lamda function that accepts incoming transcript xml documents and indexes them
 * a set of [pyinvoke](http://www.pyinvoke.org/) commandline tasks for packaing, deploying and configuring

@@ -8,7 +8,6 @@ from os import getenv as env
 from dotenv import load_dotenv
 from os.path import join, dirname, exists
 from random import choice
-from ps_environ import Env
 
 load_dotenv(join(dirname(__file__), '.env'))
 
@@ -60,20 +59,6 @@ def find_cidr_base(ctx):
     possible = set(["10.1.{}".format(x) for x in range(254)])
     return choice(list(possible.difference(taken))) + ".0/24"
 
-
-@task
-def config_fetch(ctx, namespace="default", profile=None):
-    if profile is None:
-        profile = env('AWS_DEFAULT_PROFILE')
-    common_config = Env(service='common', stage=namespace)
-    project_config = Env(service='dce-transcript-indexer', stage=namespace)
-    dotevn_path = join(dirname(__file__), '.env')
-    with open(dotevn_path, 'w') as f:
-        f.write("AWS_DEFAULT_PROFILE={}\n".format(profile))
-        f.write("LAMBDA_CODE_BUCKET={}\n".format(common_config('lambda-code-bucket')))
-        for k, v in project_config.parameter_store_cache.items():
-            var = k.upper().replace('-', '_')
-            f.write("{}={}\n".format(var, v))
 
 @task
 def package(ctx):
@@ -211,7 +196,9 @@ def delete(ctx):
 
 @task
 def init_index_template(ctx):
-
+    """
+    Populate the Elasticsearch index template. Only has to happen once after initial stack creation.
+    """
     event_payload = '{ "init_index_template": true }'
     cmd = ("aws {} lambda invoke --function-name {}-function "
            "--invocation-type RequestResponse --log-type None "
@@ -222,6 +209,9 @@ def init_index_template(ctx):
 
 @task
 def ssh_tunnel(ctx, opsworks_stack):
+    """
+    Outputs an ssh command to establish a tunnel to the Elasticsearch instance.
+    """
     cmd = ("aws {} ec2 describe-instances --output text "
            "--filters \"Name=tag:opsworks:stack,Values={}\" "
            "--query \"Reservations[].Instances[?Tags[?Key=='opsworks:instance' && contains(Value, 'admin1')]].PublicIpAddress\" "
