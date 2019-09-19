@@ -1,10 +1,13 @@
 import re
 import ssl
+import time
 import json
 import argparse
 import logging
+import requests
 import aws_lambda_logging
-from botocore.vendored import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from os import path, getenv as env
 from datetime import datetime, timedelta
 from elasticsearch import Elasticsearch
@@ -18,10 +21,21 @@ LOG_LEVEL = env('LOG_LEVEL', 'INFO')
 BOTO_LOG_LEVEL = env('BOTO_LOG_LEVEL', 'INFO')
 ES_HOST = env('ES_HOST', 'https://localhost:9200')
 LAMBDA_TASK_ROOT = env('LAMBDA_TASK_ROOT')
+CAPTION_REQUEST_RETRIES = env('CAPTION_REQUEST_RETRIES', 3)
 CAPTIONS_XML_NS = {'ttaf1': 'http://www.w3.org/2006/04/ttaf1'}
 TAB_NEWLINE_REPLACE = re.compile("[\\n\\t]+")
 
 logger = logging.getLogger()
+
+http_session = requests.Session()
+retry = Retry(
+    total=CAPTION_REQUEST_RETRIES,
+    read=CAPTION_REQUEST_RETRIES,
+    connect=CAPTION_REQUEST_RETRIES,
+    backoff_factor=0.3
+)
+adapter = HTTPAdapter(max_retries=retry)
+http_session.mount("https://", adapter)
 
 def es_connection(host=ES_HOST):
 
@@ -57,7 +71,11 @@ class InvalidTranscriptIndexName(Exception):
 
 def handler(event, context):
 
-    aws_lambda_logging.setup(LOG_LEVEL, boto_level=BOTO_LOG_LEVEL)
+    aws_lambda_logging.setup(
+        LOG_LEVEL,
+        boto_level=BOTO_LOG_LEVEL,
+        aws_request_id=context.get("aws_request_id")
+    )
 
     # one-time index template setup handling
     if "init_index_template" in event:
@@ -73,12 +91,18 @@ def handler(event, context):
     if not index_name.endswith("-transcripts"):
         raise InvalidTranscriptIndexName("Index name must match *-transcrips")
 
+    t0 = time.time()
     try:
-        resp = requests.get(captions_url, timeout=5)
+        resp = http_session.get(captions_url, timeout=5)
         resp.raise_for_status()
     except Exception as e:
         logger.exception("Error getting from {}: {}".format(captions_url, e))
         raise
+    else:
+        logger.info("Caption request successful: {}".format(resp.status_code))
+    finally:
+        t1 = time.time()
+        logger.info("Caption request took {} seconds".format(t1 - t0))
 
     xml_str = resp.text
     xml_str = TAB_NEWLINE_REPLACE.sub(" ", xml_str)

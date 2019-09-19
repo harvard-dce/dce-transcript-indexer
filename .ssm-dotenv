@@ -1,5 +1,5 @@
 project = "dce-transcript-indexer"
-stage = "jluker-add-nat-gateway"
+stage = "default"
 
 [schema]
 STACK_NAME = ["String", "Name of the cloudformation stack / prefix for stack resources"]
