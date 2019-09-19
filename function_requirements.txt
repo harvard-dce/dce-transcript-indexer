@@ -5,8 +5,12 @@
 #    pip-compile --output-file function_requirements.txt function_requirements.in
 #
 aws-lambda-logging==0.1.1
+certifi==2019.9.11        # via requests
+chardet==3.0.4            # via requests
 elasticsearch-dsl==6.4.0
 elasticsearch==6.4.0
+idna==2.8                 # via requests
 python-dateutil==2.8.0    # via elasticsearch-dsl
+requests==2.22.0
 six==1.12.0               # via elasticsearch-dsl, python-dateutil
-urllib3==1.25.3           # via elasticsearch
+urllib3==1.25.3           # via elasticsearch, requests
