@@ -145,7 +145,7 @@ Resources:
       DomainName: !Sub "${AWS::StackName}-es"
       ElasticsearchVersion: "6.7"
       EBSOptions:
-        VolumeSize: 20
+        VolumeSize: 100
         VolumeType: gp2
         EBSEnabled: true
       ElasticsearchClusterConfig:
@@ -156,6 +156,7 @@ Resources:
         AutomatedSnapshotStartHour: 6
       AdvancedOptions:
         rest.action.multi.allow_explicit_index: "true"
+        indices.fielddata.cache.size: "40"
       Tags:
         - Key: Project
           Value: "MH"
