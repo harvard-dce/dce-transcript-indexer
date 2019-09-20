@@ -74,7 +74,7 @@ def handler(event, context):
     aws_lambda_logging.setup(
         LOG_LEVEL,
         boto_level=BOTO_LOG_LEVEL,
-        aws_request_id=context.get("aws_request_id")
+        aws_request_id=context.aws_request_id
     )
 
     # one-time index template setup handling
@@ -132,18 +132,22 @@ def handler(event, context):
 
     logger.debug(doc)
 
+    t0 = time.time()
     try:
+        logger.info("Indexing doc id: {}".format(doc_id))
         resp = es.index(
             id=doc_id,
             index=index_name,
             doc_type="_doc",
-            body=doc
+            body=doc,
+            timeout=5
         )
-        logger.debug({'index response': resp})
-
     except Exception as e:
         logger.exception("Indexing to {} failed: {}".format(index_name, e))
         raise
+    finally:
+        t1 = time.time()
+        logger.info("Indexing request took {} seconds".format(t1 - t0))
 
 
 if __name__ == '__main__':
