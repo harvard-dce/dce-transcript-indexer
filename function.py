@@ -3,22 +3,18 @@ import sys
 import ssl
 import time
 import json
+import boto3
 import signal
 import argparse
 import logging
-import requests
 import aws_lambda_logging
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+from urllib.parse import urlparse
 from os import path, getenv as env
 from datetime import datetime, timedelta
 from elasticsearch import Elasticsearch
 from elasticsearch.connection import create_ssl_context
 import xml.etree.ElementTree as ET
 from contextlib import ContextDecorator
-
-import urllib3
-urllib3.disable_warnings()
 
 LOG_LEVEL = env('LOG_LEVEL', 'INFO')
 BOTO_LOG_LEVEL = env('BOTO_LOG_LEVEL', 'INFO')
@@ -29,16 +25,6 @@ CAPTIONS_XML_NS = {'ttaf1': 'http://www.w3.org/2006/04/ttaf1'}
 TAB_NEWLINE_REPLACE = re.compile("[\\n\\t]+")
 
 logger = logging.getLogger()
-
-http_session = requests.Session()
-retry = Retry(
-    total=CAPTION_REQUEST_RETRIES,
-    read=CAPTION_REQUEST_RETRIES,
-    connect=CAPTION_REQUEST_RETRIES,
-    backoff_factor=0.3
-)
-adapter = HTTPAdapter(max_retries=retry)
-http_session.mount("https://", adapter)
 
 def es_connection(host=ES_HOST):
 
@@ -54,6 +40,7 @@ def es_connection(host=ES_HOST):
     )
 
 es = es_connection()
+s3 = boto3.resource('s3')
 
 
 def init_index_template():
@@ -118,16 +105,18 @@ def handler(event, context):
 
     with time_this("caption request"):
         try:
-            resp = http_session.get(captions_url, timeout=5)
-            resp.raise_for_status()
-            xml_str = resp.text
-            logger.info("Caption request successful: {}".format(resp.status_code))
+            parsed_url = urlparse(captions_url)
+            bucket = parsed_url.netloc.split('.')[0]
+            key = parsed_url.path[1:]
+            obj = s3.Object(bucket, key).get()
+            xml_str = obj['Body'].read()
+            logger.info("Caption request successful")
         except Exception as e:
             logger.exception("Error getting from {}: {}".format(captions_url, e))
             raise
 
     with time_this("xml caption parsing"):
-        xml_str = TAB_NEWLINE_REPLACE.sub(" ", xml_str)
+        xml_str = TAB_NEWLINE_REPLACE.sub(" ", xml_str.decode())
         root = ET.fromstring(xml_str)
         captions = root.findall('.//ttaf1:p', namespaces=CAPTIONS_XML_NS)
 

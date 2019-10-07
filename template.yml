@@ -121,6 +121,7 @@ Resources:
         - "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
         - "arn:aws:iam::aws:policy/CloudWatchFullAccess"
         - "arn:aws:iam::aws:policy/CloudWatchLogsFullAccess"
+        - "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
       Policies:
         - PolicyName: !Sub "${AWS::StackName}-policy"
           PolicyDocument:
