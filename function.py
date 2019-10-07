@@ -1,7 +1,9 @@
 import re
+import sys
 import ssl
 import time
 import json
+import signal
 import argparse
 import logging
 import requests
@@ -13,6 +15,7 @@ from datetime import datetime, timedelta
 from elasticsearch import Elasticsearch
 from elasticsearch.connection import create_ssl_context
 import xml.etree.ElementTree as ET
+from contextlib import ContextDecorator
 
 import urllib3
 urllib3.disable_warnings()
@@ -69,6 +72,23 @@ def init_index_template():
 class InvalidTranscriptIndexName(Exception):
     pass
 
+class time_this(ContextDecorator):
+    def __init__(self, label):
+        self.label = label
+
+    def __enter__(self):
+        self.t0 = time.time()
+
+    def __exit__(self, *exc):
+        t1 = time.time()
+        logger.info("{} took {} seconds".format(self.label, t1 - self.t0))
+
+def timeout_handler(_signal, _frame):
+    '''Handle SIGALRM'''
+    raise Exception('Time exceeded')
+
+signal.signal(signal.SIGALRM, timeout_handler)
+
 def handler(event, context):
 
     aws_lambda_logging.setup(
@@ -76,6 +96,11 @@ def handler(event, context):
         boto_level=BOTO_LOG_LEVEL,
         aws_request_id=context.aws_request_id
     )
+
+    # Setup alarm for remaining runtime minus a second
+    time_remaining = int(context.get_remaining_time_in_millis() / 1000) - 1
+    logger.info("Setting SIGALRM handler for {}s".format(time_remaining))
+    signal.alarm(int(context.get_remaining_time_in_millis() / 1000) - 1)
 
     # one-time index template setup handling
     if "init_index_template" in event:
@@ -91,23 +116,20 @@ def handler(event, context):
     if not index_name.endswith("-transcripts"):
         raise InvalidTranscriptIndexName("Index name must match *-transcrips")
 
-    t0 = time.time()
-    try:
-        resp = http_session.get(captions_url, timeout=5)
-        resp.raise_for_status()
-    except Exception as e:
-        logger.exception("Error getting from {}: {}".format(captions_url, e))
-        raise
-    else:
-        logger.info("Caption request successful: {}".format(resp.status_code))
-    finally:
-        t1 = time.time()
-        logger.info("Caption request took {} seconds".format(t1 - t0))
+    with time_this("caption request"):
+        try:
+            resp = http_session.get(captions_url, timeout=5)
+            resp.raise_for_status()
+            xml_str = resp.text
+            logger.info("Caption request successful: {}".format(resp.status_code))
+        except Exception as e:
+            logger.exception("Error getting from {}: {}".format(captions_url, e))
+            raise
 
-    xml_str = resp.text
-    xml_str = TAB_NEWLINE_REPLACE.sub(" ", xml_str)
-    root = ET.fromstring(xml_str)
-    captions = root.findall('.//ttaf1:p', namespaces=CAPTIONS_XML_NS)
+    with time_this("xml caption parsing"):
+        xml_str = TAB_NEWLINE_REPLACE.sub(" ", xml_str)
+        root = ET.fromstring(xml_str)
+        captions = root.findall('.//ttaf1:p', namespaces=CAPTIONS_XML_NS)
 
     doc_id = "{}-{}".format(mpid, series_id)
     doc = {
@@ -118,36 +140,31 @@ def handler(event, context):
         "index_ts": datetime.utcnow().isoformat()
     }
 
-    for cap in captions:
-        if cap.text is None:
-            continue
-        begin = cap.attrib['begin']
-        (hours, minutes, seconds) = (float(x) for x in begin.split(':'))
-        td = timedelta(hours=hours, minutes=minutes, seconds=seconds)
-        doc['text'] += cap.text + " "
-        doc['captions'].append({
-            'text': cap.text.strip(),
-            'begin': td.seconds
-        })
+    with time_this("doc generation"):
+        for cap in captions:
+            if cap.text is None:
+                continue
+            begin = cap.attrib['begin']
+            (hours, minutes, seconds) = (float(x) for x in begin.split(':'))
+            td = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+            doc['text'] += cap.text + " "
+            doc['captions'].append({
+                'text': cap.text.strip(),
+                'begin': td.seconds
+            })
 
-    logger.debug(doc)
-
-    t0 = time.time()
-    try:
-        logger.info("Indexing doc id: {}".format(doc_id))
-        resp = es.index(
-            id=doc_id,
-            index=index_name,
-            doc_type="_doc",
-            body=doc,
-            timeout=5
-        )
-    except Exception as e:
-        logger.exception("Indexing to {} failed: {}".format(index_name, e))
-        raise
-    finally:
-        t1 = time.time()
-        logger.info("Indexing request took {} seconds".format(t1 - t0))
+    with time_this("index request"):
+        try:
+            logger.info("Indexing doc id: {}".format(doc_id))
+            resp = es.index(
+                id=doc_id,
+                index=index_name,
+                doc_type="_doc",
+                body=doc
+            )
+        except Exception as e:
+            logger.exception("Indexing to {} failed: {}".format(index_name, e))
+            raise
 
 
 if __name__ == '__main__':
@@ -159,8 +176,15 @@ if __name__ == '__main__':
     parser.add_argument('--index-name', required=True)
     args = parser.parse_args()
 
+    stdout_handler = logging.StreamHandler(sys.stdout)
+    logger.addHandler(stdout_handler)
+    logger.info("args: {}".format(args))
+
     class FakeContext:
-        pass
+        aws_request_id = "testing invocation"
+
+        def get_remaining_time_in_millis(self):
+            return 30000
 
     event_data = {
         "captionsUrl": args.url,
