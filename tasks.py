@@ -76,7 +76,7 @@ def package(ctx):
 
     for asset in ['function.py', 'index_template.json']:
         asset_path = join(dirname(__file__), asset)
-        ctx.run("ln -s -f -r -t {} {}".format(build_path, asset_path))
+        ctx.run("ln -s -f {} {}".format(asset_path, build_path))
 
     print("packaging zip file")
     zip_path = join(dirname(__file__), 'function.zip')

@@ -8,6 +8,7 @@ import signal
 import argparse
 import logging
 import aws_lambda_logging
+import webvtt
 from urllib.parse import urlparse
 from os import path, getenv as env
 from datetime import datetime, timedelta
@@ -15,6 +16,7 @@ from elasticsearch import Elasticsearch
 from elasticsearch.connection import create_ssl_context
 import xml.etree.ElementTree as ET
 from contextlib import ContextDecorator
+from io import StringIO
 
 LOG_LEVEL = env('LOG_LEVEL', 'INFO')
 BOTO_LOG_LEVEL = env('BOTO_LOG_LEVEL', 'INFO')
@@ -74,6 +76,16 @@ def timeout_handler(_signal, _frame):
     '''Handle SIGALRM'''
     raise Exception('Time exceeded')
 
+def append_to_doc(doc, begin, text):
+    (hours, minutes, seconds) = (float(x) for x in begin.split(':'))
+    td = timedelta(hours=hours, minutes=minutes, seconds=seconds)
+    doc['text'] += text + " "
+    doc['captions'].append({
+        'text': text.strip(),
+        'begin': td.seconds
+    })
+    return doc
+
 signal.signal(signal.SIGALRM, timeout_handler)
 
 def handler(event, context):
@@ -97,28 +109,12 @@ def handler(event, context):
     captions_url = event["captionsUrl"]
     mpid = event["mpid"]
     series_id = event["seriesId"]
+    format = event["format"] if "format" in event and event["format"] else "dfxp"
 
     logger.info(event)
 
     if not index_name.endswith("-transcripts"):
         raise InvalidTranscriptIndexName("Index name must match *-transcrips")
-
-    with time_this("caption request"):
-        try:
-            parsed_url = urlparse(captions_url)
-            bucket = parsed_url.netloc.split('.')[0]
-            key = parsed_url.path[1:]
-            obj = s3.Object(bucket, key).get()
-            xml_str = obj['Body'].read()
-            logger.info("Caption request successful")
-        except Exception as e:
-            logger.exception("Error getting from {}: {}".format(captions_url, e))
-            raise
-
-    with time_this("xml caption parsing"):
-        xml_str = TAB_NEWLINE_REPLACE.sub(" ", xml_str.decode())
-        root = ET.fromstring(xml_str)
-        captions = root.findall('.//ttaf1:p', namespaces=CAPTIONS_XML_NS)
 
     doc_id = "{}-{}".format(mpid, series_id)
     doc = {
@@ -129,18 +125,39 @@ def handler(event, context):
         "index_ts": datetime.utcnow().isoformat()
     }
 
-    with time_this("doc generation"):
-        for cap in captions:
-            if cap.text is None:
-                continue
-            begin = cap.attrib['begin']
-            (hours, minutes, seconds) = (float(x) for x in begin.split(':'))
-            td = timedelta(hours=hours, minutes=minutes, seconds=seconds)
-            doc['text'] += cap.text + " "
-            doc['captions'].append({
-                'text': cap.text.strip(),
-                'begin': td.seconds
-            })
+    with time_this("caption request"):
+        try:
+            parsed_url = urlparse(captions_url)
+            bucket = parsed_url.netloc.split('.')[0]
+            key = parsed_url.path[1:]
+            obj = s3.Object(bucket, key).get()
+            captions_str = obj['Body'].read()
+            logger.info("Caption request successful")
+        except Exception as e:
+            logger.exception("Error getting from {}: {}".format(captions_url, e))
+            raise
+
+    if format == "webvtt":
+        # WebVtt
+        with time_this("webvtt caption generation"):
+            buffer = StringIO(captions_str.decode())
+            for cap in webvtt.read_buffer(buffer):
+                if cap.text is None:
+                    continue
+                append_to_doc(doc, cap.start, cap.text)    
+
+    else:
+        # Dfxp
+        with time_this("xml caption parsing"):
+            captions_str = TAB_NEWLINE_REPLACE.sub(" ", captions_str.decode())
+            root = ET.fromstring(captions_str)
+            captions = root.findall('.//ttaf1:p', namespaces=CAPTIONS_XML_NS)
+
+        with time_this("xml doc generation"):
+            for cap in captions:
+                if cap.text is None:
+                    continue
+                append_to_doc(doc, cap.attrib['begin'], cap.text)
 
     with time_this("index request"):
         try:
@@ -163,6 +180,7 @@ if __name__ == '__main__':
     parser.add_argument('--mpid', required=True)
     parser.add_argument('--series-id', required=True)
     parser.add_argument('--index-name', required=True)
+    parser.add_argument('--format', required=False)
     args = parser.parse_args()
 
     stdout_handler = logging.StreamHandler(sys.stdout)
@@ -179,6 +197,7 @@ if __name__ == '__main__':
         "captionsUrl": args.url,
         "mpid": args.mpid,
         "seriesId": args.series_id,
-        "indexName": args.index_name
+        "indexName": args.index_name,
+        "format": args.format
     }
     handler(event_data, FakeContext())

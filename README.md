@@ -8,15 +8,31 @@ This project sets up a CloudFormation stack containing the following:
 * A VPC Endpoint to allow services within the vpc (e.g. lambda functions) to access s3
   without needing to go through a NAT gateway
 * Single-node ElasticSearch instance within the VPC
-* python 3.6 Lamda function that accepts incoming transcript xml documents and indexes them
+* python 3.12 Lamda function that accepts incoming transcript xml documents and indexes them
 * a set of [pyinvoke](http://www.pyinvoke.org/) commandline tasks for packaing, deploying and configuring
 
 ### Getting started
 
-`pip install requirements.txt` followed by `invoke -l` to confirm setup and show the available commands.
+`pip install -r requirements.txt` followed by `invoke -l` to confirm setup and show the available commands.
 
 Copy `example.env` to `.env` and update the settings. See inline comments. If you're working with an existing stack
 you'll need to update `.env` with the values the stack was built with. 
+
+### Testing Locally
+
+Establish a tunnel to the ES transcript index. Use 'invoke ssh-tunnel' to get the right command.
+Run on the command line:
+
+```
+python function.py --format CAPTIONS_FORMAT --url URL_TO_CAPTION_FILE_IN_DISTRIBUTION_BUCKET --mpid MP_ID --series-id SERIES_ID --index-name OPENCAST_STACK_NAME-transcripts
+```
+
+Where:
+* CAPTIONS_FORMAT: dfxp (default) or webvtt
+* URL_TO_CAPTION_FILE_IN_DISTRIBUTION_BUCKET: url to distributed caption, must be publicly readable
+* MP_ID: media package id
+* SERIES_ID: series id
+* OPENCAST_STACK_NAME: the cluster name
 
 ### Commands
 

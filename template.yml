@@ -89,7 +89,7 @@ Resources:
     Type: AWS::Lambda::Function
     DependsOn: TranscriptIndexerES
     Properties:
-      Runtime: python3.6
+      Runtime: python3.12
       Handler: function.handler
       FunctionName: !Sub "${AWS::StackName}-function"
       Role: !GetAtt [TranscriptIndexerRole, Arn]
@@ -195,6 +195,7 @@ Resources:
       EvaluationPeriods: 1
       Threshold: 1
       Statistic: Sum
+      TreatMissingData: ignore
 
 Outputs:
   DomainArn:
