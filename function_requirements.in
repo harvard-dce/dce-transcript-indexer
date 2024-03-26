@@ -2,3 +2,4 @@ requests
 elasticsearch>=6,<7
 elasticsearch-dsl>=6,<7
 aws-lambda-logging
+webvtt-py
