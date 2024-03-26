@@ -151,6 +151,8 @@ def deploy(ctx):
            "ParameterKey=LambdaCodeBucket,ParameterValue='{}' "
            "ParameterKey=NotificationEmail,ParameterValue='{}' "
            "ParameterKey=ElasticsearchInstanceType,ParameterValue='{}' "
+           "ParameterKey=LambdaTimeout,ParameterValue='{}' "
+           "ParameterKey=LambdaMemory,ParameterValue='{}' "
            ).format(
         profile_arg(),
         create_or_update,
@@ -159,7 +161,9 @@ def deploy(ctx):
         cidr_block,
         getenv('LAMBDA_CODE_BUCKET'),
         getenv('NOTIFICATION_EMAIL'),
-        getenv('ES_INSTANCE_TYPE')
+        getenv('ES_INSTANCE_TYPE'),
+        getenv('LAMBDA_TIMEOUT'),
+        getenv('LAMBDA_MEMORY')
     )
 
     res = ctx.run(cmd, warn=True, hide=True)
@@ -224,5 +228,3 @@ def ssh_tunnel(ctx, opsworks_stack):
            ).format(profile_arg(), env('STACK_NAME'))
     es_endpoint = ctx.run(cmd, hide=True).stdout.strip()
     print("ssh -N -f -L 9200:{}:443 {}".format(es_endpoint, instance_ip))
-
-

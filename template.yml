@@ -11,6 +11,12 @@ Parameters:
   ElasticsearchInstanceType:
     Type: String
     Default: t2.small.elasticsearch
+  LambdaTimeout:
+    Type: String
+    Default: 180
+  LambdaMemory:
+    Type: String
+    Default: 256
 
 Resources:
 
@@ -93,7 +99,8 @@ Resources:
       Handler: function.handler
       FunctionName: !Sub "${AWS::StackName}-function"
       Role: !GetAtt [TranscriptIndexerRole, Arn]
-      Timeout: 30
+      Timeout: !Ref LambdaTimeout
+      MemorySize: !Ref LambdaMemory
       Code:
         S3Bucket: !Ref LambdaCodeBucket
         S3Key: !Sub "dce-transcript-indexer/${AWS::StackName}-function.zip"
