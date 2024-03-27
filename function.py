@@ -172,6 +172,7 @@ def handler(event, context):
             logger.exception("Indexing to {} failed: {}".format(index_name, e))
             raise
 
+    signal.alarm(0)
 
 if __name__ == '__main__':
 
