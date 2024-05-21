@@ -47,7 +47,7 @@ Create a `function.zip` archive of the lambda python function code along with al
 You must run `invoke package` before running this command if building a new stack.
 
 This will create a new Cloudformation stack or update an existing one. See the `template.yml` for a full picture of
-the resources created.
+the resources created. **Updates are done via change sets that must be manually executed!**
 
 ##### `invoke init-index-template`
 

@@ -1,6 +1,7 @@
 
 import os
 import json
+import time
 import boto3
 import shutil
 from invoke import task, Exit
@@ -128,10 +129,11 @@ def deploy(ctx):
     current_stack = existing_stack(ctx)
 
     if current_stack is None:
-        create_or_update = "create"
+        operation = "create-stack"
         cidr_block = find_cidr_base(ctx)
     else:
-        create_or_update = "update"
+        operation = "create-change-set"
+        change_set_name = "change-set-{}".format(int(time.time()))
         try:
             cidr_block = next(
                 x["OutputValue"] for x in current_stack["Outputs"]
@@ -141,7 +143,7 @@ def deploy(ctx):
             print("Existing stack doesn't have a cidr block?!?!")
             raise Exit(1)
 
-    cmd = ("aws {} cloudformation {}-stack "
+    cmd = ("aws {} cloudformation {} "
            "--stack-name {} "
            "--capabilities CAPABILITY_NAMED_IAM "
            "--template-body file://{} "
@@ -153,9 +155,10 @@ def deploy(ctx):
            "ParameterKey=ElasticsearchInstanceType,ParameterValue='{}' "
            "ParameterKey=LambdaTimeout,ParameterValue='{}' "
            "ParameterKey=LambdaMemory,ParameterValue='{}' "
+           "--change-set-name {}"
            ).format(
         profile_arg(),
-        create_or_update,
+        operation,
         getenv("STACK_NAME"),
         template_path,
         cidr_block,
@@ -163,19 +166,27 @@ def deploy(ctx):
         getenv('NOTIFICATION_EMAIL'),
         getenv('ES_INSTANCE_TYPE'),
         getenv('LAMBDA_TIMEOUT'),
-        getenv('LAMBDA_MEMORY')
+        getenv('LAMBDA_MEMORY'),
+        change_set_name
     )
 
-    res = ctx.run(cmd, warn=True, hide=True)
+    res = ctx.run(cmd, warn=True, echo=True)
     if res.exited != 0 and "No updates" in res.stderr:
         print("Stack is up-to-date!")
         return
     elif res.exited != 0:
         raise Exit(res.stderr)
 
+    if current_stack is None:
+        wait_for = "stack-create-complete"
+        wait_for_name = "--stack-name {}".format(getenv('STACK_NAME'))
+    else:
+        wait_for = "change-set-create-complete"
+        wait_for_name = "--change-set-name ".format(change_set_name)
+
     print("Waiting for deployment/update to complete...")
-    cmd = ("aws --profile test cloudformation wait stack-{}-complete "
-           "--stack-name {}").format(create_or_update, getenv('STACK_NAME'))
+    cmd = ("aws {} cloudformation wait {} "
+           "{}").format(profile_arg(), wait_for, wait_for_name)
     ctx.run(cmd)
     print("Done")
 
