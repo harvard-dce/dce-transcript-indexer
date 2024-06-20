@@ -10,8 +10,6 @@ certifi==2024.2.2
     # via requests
 charset-normalizer==3.3.2
     # via requests
-docopt==0.6.2
-    # via webvtt-py
 elasticsearch==6.8.2
     # via
     #   -r function_requirements.in
@@ -32,5 +30,5 @@ urllib3==2.2.1
     # via
     #   elasticsearch
     #   requests
-webvtt-py==0.4.6
+webvtt-py==0.5.1
     # via -r function_requirements.in

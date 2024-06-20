@@ -30,10 +30,6 @@ click==8.1.7
     # via ssm-dotenv
 colorama==0.4.4
     # via awscli
-docopt==0.6.2
-    # via
-    #   -r function_requirements.txt
-    #   webvtt-py
 docutils==0.16
     # via awscli
 elasticsearch==6.8.2
@@ -90,5 +86,5 @@ urllib3==2.2.1
     #   botocore
     #   elasticsearch
     #   requests
-webvtt-py==0.4.6
+webvtt-py==0.5.1
     # via -r function_requirements.txt
